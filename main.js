@@ -219,7 +219,7 @@ class FinancasView extends obsidian.ItemView {
   renderEmpty(el) {
     const wrap = el.createDiv("financas-empty");
     wrap.createEl("div", { cls: "financas-empty-icon", text: "🪙" });
-    wrap.createEl("h2", { text: "CSV file not found" });
+    wrap.createEl("h2", { text: "Data file not found" });
     const p = wrap.createEl("p");
     p.innerHTML = `Make sure the file exists at <code>${this.plugin.settings.dataFilePath}</code> (relative to your vault root).`;
     const btn = wrap.createEl("button", { cls: "financas-btn-primary", text: "⚙ Configure path" });
@@ -648,10 +648,10 @@ class SettingsModal extends obsidian.Modal {
     const { contentEl } = this;
     contentEl.addClass("financas-modal");
 
-    // CSV path
-    contentEl.createEl("p", { cls: "financas-setting-label", text: "CSV file path (relative to vault root):" });
+    // Data file path
+    contentEl.createEl("p", { cls: "financas-setting-label", text: "Data file path (relative to vault root):" });
     const inputPath = contentEl.createEl("input", { type: "text", cls: "financas-input", value: this.plugin.settings.dataFilePath });
-    contentEl.createEl("p", { cls: "financas-hint", text: "Example: personal-finance.csv" });
+    contentEl.createEl("p", { cls: "financas-hint", text: "Example: Calcs/Monthly Calcs.md" });
 
     // Currency
     contentEl.createEl("p", { cls: "financas-setting-label", text: "Currency:" });
