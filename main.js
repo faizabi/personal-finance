@@ -50,7 +50,7 @@ function monthKey(date) {
 }
 function monthLabel(key) {
   const [y, m] = key.split("-");
-  const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return `${months[parseInt(m) - 1]}/${y.slice(2)}`;
 }
 function dayKey(date) {
@@ -231,7 +231,7 @@ class FinancasView extends obsidian.ItemView {
     const helper = wrap.createDiv("financas-empty-helper");
     helper.createEl("p", { text: "Your Markdown file should look like this:" });
     const pre = helper.createEl("pre");
-    pre.setText("| Date | Expense | Category | Description | Balance Remaining |\n| --- | --- | --- | --- | --- |\n| 2024-05-20 | -50.00 | Food | Market | 2950.00 |\n| 2024-05-21 | 3000.00 | Salary | Monthly | 5950.00 |");
+    pre.setText("| Date | Expense | Category | Description | Balance Remaining |\n| --- | --- | --- | --- | --- |\n| 2024-05-01 | 0.00 | Income | Starting Balance | 2000.00 |\n| 2024-05-20 | -120.00 | Food | Groceries | 1880.00 |\n| 2024-05-21 | -50.00 | Transport | Fuel | 1830.00 |");
 
     const btnRow = wrap.createDiv("financas-modal-btns");
     const btn = wrap.createEl("button", { cls: "financas-btn-primary", text: "⚙ Configure path" });
@@ -301,8 +301,8 @@ class FinancasView extends obsidian.ItemView {
     const data = this.getFilteredData();
     const rawMonth = this.getRawMonthData();
     
-    const receitas = data.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
-    const despesas = data.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    const receitas = rawMonth.length > 0 ? rawMonth[0].balance : 0;
+    const despesas = rawMonth.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
     const saldo    = rawMonth.length > 0 ? rawMonth[rawMonth.length - 1].balance : 0;
     
     const cards = el.createDiv("financas-cards");
@@ -361,10 +361,10 @@ class FinancasView extends obsidian.ItemView {
     const lastWithData = points.reduce((last, p, i) => p.hasData ? i : last, -1);
     const visiblePoints = lastWithData >= 0 ? points.slice(0, lastWithData + 1) : points;
 
-    this.renderLineChart(section, visiblePoints, daysInMonth);
+    this.renderLineChart(section, visiblePoints, daysInMonth, data, { y, m });
   }
 
-  renderLineChart(container, points, daysInMonth) {
+  renderLineChart(container, points, daysInMonth, rawData, dateParts) {
     const wrap = container.createDiv("financas-linechart-wrap");
 
     const W = 620, H = 200, PAD = { top: 20, right: 80, bottom: 32, left: 68 };
@@ -397,6 +397,24 @@ class FinancasView extends obsidian.ItemView {
     const colorMain = isPos ? "#43c59e" : "#f76c6c";
     const colorRGB  = isPos ? "67,197,158" : "247,108,108";
     const uid = this.selectedMonth;
+
+    // Red Zone calculation (Balance < 800)
+    const y800 = yScale(800);
+    const showRedZone = minVal < 800;
+
+    // Relative Expenses (Small bars at the bottom)
+    const expenseBars = points.filter(p => p.hasData).map(p => {
+      const dayStr = `${dateParts.y}-${String(dateParts.m).padStart(2,"0")}-${String(p.day).padStart(2,"0")}`;
+      const dayExpense = rawData
+        .filter(r => dayKey(r.date) === dayStr && r.amount < 0)
+        .reduce((s, r) => s + Math.abs(r.amount), 0);
+      
+      if (dayExpense === 0) return "";
+      const barMaxH = 20;
+      const barH = Math.min(barMaxH, (dayExpense / (range || 1)) * 100);
+      return `<rect x="${xScale(p.day) - 1}" y="${H - PAD.bottom - barH}" width="2" height="${barH}" 
+                    fill="#f76c6c" opacity="0.5" />`;
+    }).join("");
 
     // Grade horizontal
     const gridLines = [];
@@ -455,6 +473,17 @@ class FinancasView extends obsidian.ItemView {
         ${gridLines.join("")}
         ${xLabels.join("")}
 
+        <!-- Red Zone Area -->
+        ${showRedZone ? `
+          <rect x="${PAD.left}" y="${y800.toFixed(1)}" width="${chartW}" 
+                height="${Math.max(0, yScale(minVal) - y800).toFixed(1)}"
+                fill="rgba(247, 108, 108, 0.08)" clip-path="url(#lc-clip-${uid})"/>
+          <line x1="${PAD.left}" y1="${y800.toFixed(1)}" x2="${W-PAD.right}" y2="${y800.toFixed(1)}"
+                stroke="#f76c6c" stroke-width="1" stroke-dasharray="2,2" opacity="0.3"/>
+        ` : ""}
+
+        ${expenseBars}
+
         <!-- Linha do zero -->
         ${minVal < 0 && maxVal > 0 ? `
         <line x1="${PAD.left}" y1="${y0.toFixed(1)}" x2="${W-PAD.right}" y2="${y0.toFixed(1)}"
@@ -500,7 +529,7 @@ class FinancasView extends obsidian.ItemView {
         if (this.filterCategoria !== "all" && r.categoria !== this.filterCategoria) return false;
         return true;
       });
-      const receitas = mData.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+      const receitas = mData.length > 0 ? mData[0].balance : 0;
       const despesas = mData.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
       return { month: m, receitas, despesas };
     });
