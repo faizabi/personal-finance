@@ -26,16 +26,22 @@ function parseCSVLine(line) {
 
 function parseValue(str) {
   if (!str) return null;
-  const cleaned = str.replace(/R\$\s*/g, "").replace(/"/g, "").trim().replace(/,/g, "");
+  // Remove currency symbols (R$, Rs.), Markdown formatting (**), and commas
+  const cleaned = str.replace(/R\$\s*|Rs\.\s*|\*\*|\*/gi, "").replace(/"/g, "").replace(/,/g, "").trim();
   const val = parseFloat(cleaned);
   return isNaN(val) ? null : val;
 }
 
 function parseDate(str) {
   if (!str || !str.trim()) return null;
-  const match = str.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let match = str.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const date = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+    return isNaN(date.getTime()) ? null : date;
+  }
+  match = str.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
   if (!match) return null;
-  const date = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
+  const date = new Date(parseInt(match[3]), parseInt(match[2]) - 1, parseInt(match[1]));
   return isNaN(date.getTime()) ? null : date;
 }
 
