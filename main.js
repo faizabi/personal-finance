@@ -2,7 +2,7 @@
 var obsidian = require('obsidian');
 
 const VIEW_TYPE = "financas-overview";
-const DEFAULT_SETTINGS = { dataFilePath: "personal-finance.md", currency: "BRL", locale: "pt-BR" };
+const DEFAULT_SETTINGS = { dataFilePath: "Calcs/Monthly Calcs.md", currency: "BRL", locale: "pt-BR" };
 
 const CATEGORY_COLORS = [
   "#4f8ef7","#f76c6c","#43c59e","#f7b731","#a29bfe",
