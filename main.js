@@ -2,7 +2,7 @@
 var obsidian = require('obsidian');
 
 const VIEW_TYPE = "financas-overview";
-const DEFAULT_SETTINGS = { dataFilePath: "personal-finance.csv", currency: "BRL", locale: "pt-BR" };
+const DEFAULT_SETTINGS = { dataFilePath: "personal-finance.md", currency: "BRL", locale: "pt-BR" };
 
 const CATEGORY_COLORS = [
   "#4f8ef7","#f76c6c","#43c59e","#f7b731","#a29bfe",
@@ -85,6 +85,47 @@ function parseCSV(content) {
   return rows;
 }
 
+function parseMarkdownTable(content) {
+  const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith('|') && l.endsWith('|'));
+  if (lines.length < 3) return [];
+
+  // Extract fields from each line by removing start/end pipes and splitting
+  const tableData = lines.map(line => 
+    line.slice(1, -1).split('|').map(f => f.trim())
+  );
+
+  const header = tableData[0].map(h =>
+    h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  );
+
+  const idx = {
+    data:         header.findIndex(h => h === "date"),
+    categoria:    header.findIndex(h => h === "category"),
+    subcategoria: header.findIndex(h => h === "sub-category"),
+    descricao:    header.findIndex(h => h === "description"),
+    valor:        header.findIndex(h => h === "amount"),
+  };
+
+  const rows = [];
+  // Skip header (0) and separator (1)
+  for (let i = 2; i < tableData.length; i++) {
+    const fields = tableData[i];
+    const date = parseDate(idx.data >= 0 ? fields[idx.data] : "");
+    if (!date) continue;
+    const valor = idx.valor >= 0 ? parseValue(fields[idx.valor]) : null;
+    if (valor === null) continue;
+    rows.push({
+      date,
+      categoria:    (idx.categoria    >= 0 ? fields[idx.categoria]    : "") || "Sem categoria",
+      subcategoria: (idx.subcategoria >= 0 ? fields[idx.subcategoria] : "") || "",
+      descricao:    (idx.descricao    >= 0 ? fields[idx.descricao]    : "") || "",
+      valor,
+      isReceita: valor > 0,
+    });
+  }
+  return rows;
+}
+
 // Formatação dinâmica baseada nas settings (chamada via plugin.settings)
 let _formatSettings = { currency: "BRL", locale: "pt-BR" };
 function setFormatSettings(s) { _formatSettings = s; }
@@ -124,6 +165,10 @@ class FinancasView extends obsidian.ItemView {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!file || !(file instanceof obsidian.TFile)) return [];
     const content = await this.app.vault.read(file);
+    
+    if (path.toLowerCase().endsWith(".md")) {
+      return parseMarkdownTable(content);
+    }
     return parseCSV(content);
   }
 
