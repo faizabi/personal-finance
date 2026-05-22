@@ -55,14 +55,14 @@ function parseCSV(content) {
   const lines = content.split(/\r?\n/);
   if (lines.length < 2) return [];
   const header = parseCSVLine(lines[0]).map(h =>
-    h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    h.toLowerCase().replace(/[^a-z]/g, "")
   );
   const idx = {
     data:         header.findIndex(h => h === "date"),
+    expense:      header.findIndex(h => h === "expense"),
     categoria:    header.findIndex(h => h === "category"),
-    subcategoria: header.findIndex(h => h === "sub-category"),
     descricao:    header.findIndex(h => h === "description"),
-    valor:        header.findIndex(h => h === "amount"),
+    balance:      header.findIndex(h => h === "balanceremaining"),
   };
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
@@ -71,15 +71,15 @@ function parseCSV(content) {
     const fields = parseCSVLine(line);
     const date = parseDate(idx.data >= 0 ? fields[idx.data] : "");
     if (!date) continue;
-    const valor = idx.valor >= 0 ? parseValue(fields[idx.valor]) : null;
-    if (valor === null) continue;
+    const amount = idx.expense >= 0 ? parseValue(fields[idx.expense]) : 0;
+    const balance = idx.balance >= 0 ? parseValue(fields[idx.balance]) : 0;
     rows.push({
       date,
-      categoria:    (idx.categoria    >= 0 ? fields[idx.categoria]    : "") || "Sem categoria",
-      subcategoria: (idx.subcategoria >= 0 ? fields[idx.subcategoria] : "") || "",
-      descricao:    (idx.descricao    >= 0 ? fields[idx.descricao]    : "") || "",
-      valor,
-      isReceita: valor > 0,
+      categoria: (idx.categoria >= 0 ? fields[idx.categoria] : "") || "Uncategorized",
+      descricao: (idx.descricao >= 0 ? fields[idx.descricao] : ""),
+      amount,
+      balance,
+      isReceita: amount > 0,
     });
   }
   return rows;
@@ -95,15 +95,15 @@ function parseMarkdownTable(content) {
   );
 
   const header = tableData[0].map(h =>
-    h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    h.toLowerCase().replace(/[^a-z]/g, "")
   );
 
   const idx = {
     data:         header.findIndex(h => h === "date"),
+    expense:      header.findIndex(h => h === "expense"),
     categoria:    header.findIndex(h => h === "category"),
-    subcategoria: header.findIndex(h => h === "sub-category"),
     descricao:    header.findIndex(h => h === "description"),
-    valor:        header.findIndex(h => h === "amount"),
+    balance:      header.findIndex(h => h === "balanceremaining"),
   };
 
   const rows = [];
@@ -112,15 +112,15 @@ function parseMarkdownTable(content) {
     const fields = tableData[i];
     const date = parseDate(idx.data >= 0 ? fields[idx.data] : "");
     if (!date) continue;
-    const valor = idx.valor >= 0 ? parseValue(fields[idx.valor]) : null;
-    if (valor === null) continue;
+    const amount = idx.expense >= 0 ? parseValue(fields[idx.expense]) : 0;
+    const balance = idx.balance >= 0 ? parseValue(fields[idx.balance]) : 0;
     rows.push({
       date,
-      categoria:    (idx.categoria    >= 0 ? fields[idx.categoria]    : "") || "Sem categoria",
-      subcategoria: (idx.subcategoria >= 0 ? fields[idx.subcategoria] : "") || "",
-      descricao:    (idx.descricao    >= 0 ? fields[idx.descricao]    : "") || "",
-      valor,
-      isReceita: valor > 0,
+      categoria: (idx.categoria >= 0 ? fields[idx.categoria] : "") || "Uncategorized",
+      descricao: (idx.descricao >= 0 ? fields[idx.descricao] : ""),
+      amount,
+      balance,
+      isReceita: amount > 0,
     });
   }
   return rows;
@@ -150,7 +150,6 @@ class FinancasView extends obsidian.ItemView {
     this.selectedMonth = null;
     this.allData = [];
     this.filterCategoria = "all";
-    this.filterSubcategoria = "all";
   }
 
   getViewType()    { return VIEW_TYPE; }
@@ -184,7 +183,6 @@ class FinancasView extends obsidian.ItemView {
   getFilteredData() {
     return this.getRawMonthData().filter(r => {
       if (this.filterCategoria !== "all" && r.categoria !== this.filterCategoria) return false;
-      if (this.filterSubcategoria !== "all" && r.subcategoria !== this.filterSubcategoria) return false;
       return true;
     });
   }
@@ -204,15 +202,7 @@ class FinancasView extends obsidian.ItemView {
       this.selectedMonth = months[months.length - 1];
     }
 
-    // Reset sub quando categoria muda
     const rawMonth = this.getRawMonthData();
-    const validSubs = [...new Set(rawMonth
-      .filter(r => this.filterCategoria === "all" || r.categoria === this.filterCategoria)
-      .map(r => r.subcategoria).filter(Boolean))];
-    if (this.filterSubcategoria !== "all" && !validSubs.includes(this.filterSubcategoria)) {
-      this.filterSubcategoria = "all";
-    }
-
     this.renderHeader(el, months, rawMonth);
     this.renderSummaryCards(el);
     this.renderBarChart(el, months);
@@ -235,7 +225,7 @@ class FinancasView extends obsidian.ItemView {
     const helper = wrap.createDiv("financas-empty-helper");
     helper.createEl("p", { text: "Your Markdown file should look like this:" });
     const pre = helper.createEl("pre");
-    pre.setText("| Date | Category | Sub-category | Description | Amount |\n| --- | --- | --- | --- | --- |\n| 2024-05-20 | Food | Groceries | Market | -50.00 |\n| 2024-05-21 | Salary | Work | Monthly | 3000.00 |");
+    pre.setText("| Date | Expense | Category | Description | Balance Remaining |\n| --- | --- | --- | --- | --- |\n| 2024-05-20 | -50.00 | Food | Market | 2950.00 |\n| 2024-05-21 | 3000.00 | Salary | Monthly | 5950.00 |");
 
     const btnRow = wrap.createDiv("financas-modal-btns");
     const btn = wrap.createEl("button", { cls: "financas-btn-primary", text: "⚙ Configure path" });
@@ -257,7 +247,6 @@ class FinancasView extends obsidian.ItemView {
     });
     selectMonth.addEventListener("change", e => {
       this.selectedMonth = e.target.value;
-      this.filterSubcategoria = "all";
       this.render();
     });
 
@@ -275,11 +264,6 @@ class FinancasView extends obsidian.ItemView {
     const categorias = ["all", ...new Set(rawMonth.map(r => r.categoria))].sort((a, b) =>
       a === "all" ? -1 : b === "all" ? 1 : a.localeCompare(b)
     );
-    const subcategorias = ["all", ...new Set(
-      rawMonth
-        .filter(r => this.filterCategoria === "all" || r.categoria === this.filterCategoria)
-        .map(r => r.subcategoria).filter(Boolean)
-    )].sort((a, b) => a === "all" ? -1 : b === "all" ? 1 : a.localeCompare(b));
 
     const mkFilter = (label, options, current, onChange) => {
       const wrap = row2.createDiv("financas-filter-wrap");
@@ -294,23 +278,14 @@ class FinancasView extends obsidian.ItemView {
 
     mkFilter("Category:", categorias, this.filterCategoria, val => {
       this.filterCategoria = val;
-      this.filterSubcategoria = "all";
       this.render();
     });
 
-    if (subcategorias.length > 1) {
-      mkFilter("Sub-category:", subcategorias, this.filterSubcategoria, val => {
-        this.filterSubcategoria = val;
-        this.render();
-      });
-    }
-
     // Badge de filtro ativo
-    if (this.filterCategoria !== "all" || this.filterSubcategoria !== "all") {
+    if (this.filterCategoria !== "all") {
       const badge = row2.createEl("button", { cls: "financas-filter-clear", text: "✕ Clear filters" });
       badge.addEventListener("click", () => {
         this.filterCategoria = "all";
-        this.filterSubcategoria = "all";
         this.render();
       });
     }
@@ -318,10 +293,12 @@ class FinancasView extends obsidian.ItemView {
 
   renderSummaryCards(el) {
     const data = this.getFilteredData();
-    const receitas = data.filter(r => r.valor > 0).reduce((s, r) => s + r.valor, 0);
-    const despesas = data.filter(r => r.valor < 0).reduce((s, r) => s + Math.abs(r.valor), 0);
-    const saldo    = receitas - despesas;
-
+    const rawMonth = this.getRawMonthData();
+    
+    const receitas = data.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+    const despesas = data.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    const saldo    = rawMonth.length > 0 ? rawMonth[rawMonth.length - 1].balance : 0;
+    
     const cards = el.createDiv("financas-cards");
 
     const mkCard = (label, value, cls, prefix = "") => {
@@ -347,12 +324,11 @@ class FinancasView extends obsidian.ItemView {
     const section = el.createDiv("financas-section");
     section.createEl("h2", { cls: "financas-section-title", text: "Daily Balance" });
 
-    // Agrupa despesas líquidas por dia
     const byDay = {};
     data.forEach(r => {
       const k = dayKey(r.date);
-      if (!byDay[k]) byDay[k] = 0;
-      byDay[k] += r.valor;
+      // Para o saldo diário, pegamos o último registro de 'balance' daquele dia
+      byDay[k] = r.balance;
     });
 
     if (Object.keys(byDay).length === 0) {
@@ -363,12 +339,16 @@ class FinancasView extends obsidian.ItemView {
     // Constrói série cumulativa dia a dia dentro do mês
     const [y, m] = this.selectedMonth.split("-").map(Number);
     const daysInMonth = new Date(y, m, 0).getDate();
-    let cumulative = 0;
+    
+    // Pega o saldo inicial (último do mês anterior ou 0)
+    const lastBalance = this.allData.filter(r => monthKey(r.date) < this.selectedMonth).pop()?.balance || 0;
+    let currentBalance = lastBalance;
+
     const points = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const k = `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      if (byDay[k] !== undefined) cumulative += byDay[k];
-      points.push({ day: d, value: cumulative, hasData: byDay[k] !== undefined });
+      if (byDay[k] !== undefined) currentBalance = byDay[k];
+      points.push({ day: d, value: currentBalance, hasData: byDay[k] !== undefined });
     }
 
     // Corta os dias do futuro (sem dados ainda) — mantém até o último com dado
@@ -512,11 +492,10 @@ class FinancasView extends obsidian.ItemView {
       const mData = this.allData.filter(r => {
         if (monthKey(r.date) !== m) return false;
         if (this.filterCategoria !== "all" && r.categoria !== this.filterCategoria) return false;
-        if (this.filterSubcategoria !== "all" && r.subcategoria !== this.filterSubcategoria) return false;
         return true;
       });
-      const receitas = mData.filter(r => r.valor > 0).reduce((s, r) => s + r.valor, 0);
-      const despesas = mData.filter(r => r.valor < 0).reduce((s, r) => s + Math.abs(r.valor), 0);
+      const receitas = mData.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+      const despesas = mData.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
       return { month: m, receitas, despesas };
     });
 
@@ -550,7 +529,7 @@ class FinancasView extends obsidian.ItemView {
   // ── Tabela por categoria com drill-down ──────────────────────────────────
   renderCategoryTable(el) {
     const data     = this.getFilteredData();
-    const despesas = data.filter(r => r.valor < 0);
+    const despesas = data.filter(r => r.amount < 0);
     const section  = el.createDiv("financas-section");
     section.createEl("h2", { cls: "financas-section-title", text: `Spending by Category — ${monthLabel(this.selectedMonth)}` });
 
@@ -559,14 +538,10 @@ class FinancasView extends obsidian.ItemView {
       return;
     }
 
-    // Agrupa: categoria → { total, subcategorias: { nome → total } }
     const byCategory = {};
     despesas.forEach(r => {
-      if (!byCategory[r.categoria]) byCategory[r.categoria] = { total: 0, subs: {} };
-      byCategory[r.categoria].total += Math.abs(r.valor);
-      const subKey = r.subcategoria || r.descricao || "—";
-      if (!byCategory[r.categoria].subs[subKey]) byCategory[r.categoria].subs[subKey] = 0;
-      byCategory[r.categoria].subs[subKey] += Math.abs(r.valor);
+      if (!byCategory[r.categoria]) byCategory[r.categoria] = { total: 0 };
+      byCategory[r.categoria].total += Math.abs(r.amount);
     });
 
     const totalDespesas = Object.values(byCategory).reduce((s, v) => s + v.total, 0);
@@ -579,22 +554,15 @@ class FinancasView extends obsidian.ItemView {
 
     const tbody = table.createEl("tbody");
 
-    sorted.forEach(([cat, { total, subs }], idx) => {
+    sorted.forEach(([cat, { total }], idx) => {
       const pct        = totalDespesas > 0 ? (total / totalDespesas) * 100 : 0;
       const color      = CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
-      const subEntries = Object.entries(subs).sort((a, b) => b[1] - a[1]);
-      const hasSubs    = subEntries.length > 1 || (subEntries.length === 1 && subEntries[0][0] !== "—");
-
-      // Estado do drill-down (armazenado na própria linha via dataset)
-      let expanded = false;
 
       // ── Linha da categoria ──
       const tr = tbody.createEl("tr", { cls: "financas-cat-row" });
-      if (hasSubs) tr.addClass("financas-cat-expandable");
 
-      // Chevron
+      // Espaçador (antigo chevron)
       const tdChevron = tr.createEl("td", { cls: "financas-td-chevron" });
-      const chevron = hasSubs ? tdChevron.createSpan({ cls: "financas-chevron", text: "▶" }) : null;
 
       const tdCat = tr.createEl("td");
       const dot = tdCat.createSpan({ cls: "financas-cat-dot" });
@@ -609,40 +577,6 @@ class FinancasView extends obsidian.ItemView {
       const bar     = barWrap.createDiv("financas-progress-bar");
       bar.style.width    = `${pct}%`;
       bar.style.background = color;
-
-      // ── Linhas de subcategoria (inicialmente ocultas) ──
-      const subRows = [];
-      if (hasSubs) {
-        subEntries.forEach(([subName, subTotal]) => {
-          const subPct = total > 0 ? (subTotal / total) * 100 : 0;
-          const subTr  = tbody.createEl("tr", { cls: "financas-sub-row financas-sub-hidden" });
-
-          subTr.createEl("td"); // espaço do chevron
-          const tdSub = subTr.createEl("td", { cls: "financas-sub-name" });
-          tdSub.createSpan({ cls: "financas-sub-indent", text: "└ " });
-          tdSub.createSpan({ text: subName });
-
-          subTr.createEl("td", { text: fmtBRL(subTotal), cls: "financas-td-num financas-sub-value" });
-          subTr.createEl("td", { text: `${subPct.toFixed(1)}%`, cls: "financas-td-num financas-sub-value" });
-
-          const tdSubBar   = subTr.createEl("td");
-          const subBarWrap = tdSubBar.createDiv("financas-progress-wrap");
-          const subBar     = subBarWrap.createDiv("financas-progress-bar");
-          subBar.style.width      = `${subPct}%`;
-          subBar.style.background = color;
-          subBar.style.opacity    = "0.6";
-
-          subRows.push(subTr);
-        });
-
-        // Toggle ao clicar na linha
-        tr.addEventListener("click", () => {
-          expanded = !expanded;
-          chevron.textContent = expanded ? "▼" : "▶";
-          tr.classList.toggle("financas-cat-expanded", expanded);
-          subRows.forEach(r => r.classList.toggle("financas-sub-hidden", !expanded));
-        });
-      }
     });
 
     const tfoot = table.createEl("tfoot");
