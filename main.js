@@ -160,16 +160,19 @@ class FinancasView extends obsidian.ItemView {
   async onOpen()  { await this.render(); }
   async onClose() { this.contentEl.empty(); }
 
-  async loadData() {
+  async getFileData() {
     const path = this.plugin.settings.dataFilePath;
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!file || !(file instanceof obsidian.TFile)) return [];
-    const content = await this.app.vault.read(file);
+    if (!file || !(file instanceof obsidian.TFile)) return { exists: false, data: [] };
     
+    const content = await this.app.vault.read(file);
+    let data = [];
     if (path.toLowerCase().endsWith(".md")) {
-      return parseMarkdownTable(content);
+      data = parseMarkdownTable(content);
+    } else {
+      data = parseCSV(content);
     }
-    return parseCSV(content);
+    return { exists: true, data };
   }
 
   // Dados do mês selecionado, ANTES dos filtros (para montar as opções de filtro)
@@ -191,9 +194,10 @@ class FinancasView extends obsidian.ItemView {
     el.empty();
     el.addClass("financas-view");
 
-    this.allData = await this.loadData();
+    const { exists, data } = await this.getFileData();
+    this.allData = data;
     setFormatSettings(this.plugin.settings);
-    if (this.allData.length === 0) { this.renderEmpty(el); return; }
+    if (!exists || this.allData.length === 0) { this.renderEmpty(el, exists); return; }
 
     const months = [...new Set(this.allData.map(r => monthKey(r.date)))].sort();
     if (!this.selectedMonth || !months.includes(this.selectedMonth)) {
@@ -216,12 +220,24 @@ class FinancasView extends obsidian.ItemView {
     this.renderCategoryTable(el);
   }
 
-  renderEmpty(el) {
+  renderEmpty(el, fileExists) {
     const wrap = el.createDiv("financas-empty");
-    wrap.createEl("div", { cls: "financas-empty-icon", text: "🪙" });
-    wrap.createEl("h2", { text: "Data file not found" });
+    wrap.createEl("div", { cls: "financas-empty-icon", text: fileExists ? "📊" : "📂" });
+    
+    const title = fileExists ? "No transactions found" : "Data file not found";
+    wrap.createEl("h2", { text: title });
+
     const p = wrap.createEl("p");
-    p.innerHTML = `Make sure the file exists at <code>${this.plugin.settings.dataFilePath}</code> (relative to your vault root).`;
+    p.innerHTML = fileExists 
+      ? "The file exists, but we couldn't find a valid table with data. Ensure your headers match exactly."
+      : `Looking for file at: <code>${this.plugin.settings.dataFilePath}</code><br><small>(Path is relative to your Vault Root)</small>`;
+
+    const helper = wrap.createDiv("financas-empty-helper");
+    helper.createEl("p", { text: "Your Markdown file should look like this:" });
+    const pre = helper.createEl("pre");
+    pre.setText("| Date | Category | Sub-category | Description | Amount |\n| --- | --- | --- | --- | --- |\n| 2024-05-20 | Food | Groceries | Market | -50.00 |\n| 2024-05-21 | Salary | Work | Monthly | 3000.00 |");
+
+    const btnRow = wrap.createDiv("financas-modal-btns");
     const btn = wrap.createEl("button", { cls: "financas-btn-primary", text: "⚙ Configure path" });
     btn.addEventListener("click", () => new SettingsModal(this.app, this.plugin, () => this.render()).open());
   }
@@ -649,9 +665,9 @@ class SettingsModal extends obsidian.Modal {
     contentEl.addClass("financas-modal");
 
     // Data file path
-    contentEl.createEl("p", { cls: "financas-setting-label", text: "Data file path (relative to vault root):" });
+    contentEl.createEl("p", { cls: "financas-setting-label", text: "Data file path:" });
     const inputPath = contentEl.createEl("input", { type: "text", cls: "financas-input", value: this.plugin.settings.dataFilePath });
-    contentEl.createEl("p", { cls: "financas-hint", text: "Example: Calcs/Monthly Calcs.md" });
+    contentEl.createEl("p", { cls: "financas-hint", text: "Enter path relative to vault root (e.g., Calcs/Monthly Calcs.md)" });
 
     // Currency
     contentEl.createEl("p", { cls: "financas-setting-label", text: "Currency:" });
