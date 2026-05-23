@@ -33,19 +33,22 @@ function parseCSVLine(line) {
 function parseValue(str) {
   if (!str) return null;
   // Remove currency symbols (R$, Rs.), Markdown formatting (**), and commas
-  const cleaned = str.replace(/R\$\s*|Rs\.\s*|\*\*|\*/gi, "").replace(/"/g, "").replace(/,/g, "").trim();
+  let cleaned = str.replace(/R\$\s*|Rs\.\s*|\*\*|\*/gi, "").replace(/"/g, "").replace(/,/g, "").trim();
+  // Remove any internal spaces (e.g. "1 000.00" -> "1000.00")
+  cleaned = cleaned.replace(/\s/g, "");
+  if (!cleaned) return null;
   const val = parseFloat(cleaned);
   return isNaN(val) ? null : val;
 }
 
 function parseDate(str) {
   if (!str || !str.trim()) return null;
-  let match = str.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let match = str.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (match) {
     const date = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
     return isNaN(date.getTime()) ? null : date;
   }
-  match = str.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  match = str.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{1,4})$/);
   if (!match) return null;
   const date = new Date(parseInt(match[3]), parseInt(match[2]) - 1, parseInt(match[1]));
   return isNaN(date.getTime()) ? null : date;
@@ -106,24 +109,32 @@ function parseMarkdownTable(content) {
     line.slice(1, -1).split('|').map(f => f.trim())
   );
 
-  const header = tableData[0].map(h =>
-    h.toLowerCase().replace(/[^a-z]/g, "")
-  );
+  // Find first valid header row dynamically
+  let headerIndex = -1;
+  let idx = {};
+  for (let i = 0; i < tableData.length; i++) {
+    const h = tableData[i].map(v => v.toLowerCase().replace(/[^a-z]/g, ""));
+    if (h.includes("date") && h.includes("expense")) {
+      headerIndex = i;
+      idx = {
+        data: h.indexOf("date"),
+        expense: h.indexOf("expense"),
+        categoria: h.indexOf("category"),
+        descricao: h.indexOf("description"),
+        balance: h.indexOf("balanceremaining"),
+      };
+      break;
+    }
+  }
 
-  const idx = {
-    data:         header.findIndex(h => h === "date"),
-    expense:      header.findIndex(h => h === "expense"),
-    categoria:    header.findIndex(h => h === "category"),
-    descricao:    header.findIndex(h => h === "description"),
-    balance:      header.findIndex(h => h === "balanceremaining"),
-  };
+  if (headerIndex === -1) return [];
 
   const rows = [];
-  // Skip header (0) and separator (1)
-  for (let i = 2; i < tableData.length; i++) {
+  for (let i = 0; i < tableData.length; i++) {
+    if (i === headerIndex) continue;
     const fields = tableData[i];
     const date = parseDate(idx.data >= 0 ? fields[idx.data] : "");
-    if (!date) continue;
+    if (!date) continue; // Skips separators and extra headers
     const amount = idx.expense >= 0 ? parseValue(fields[idx.expense]) : 0;
     const balance = idx.balance >= 0 ? parseValue(fields[idx.balance]) : 0;
     rows.push({
@@ -210,9 +221,19 @@ class FinancasView extends obsidian.ItemView {
     if (!exists || this.allData.length === 0) { this.renderEmpty(el, exists); return; }
 
     const months = [...new Set(this.allData.map(r => monthKey(r.date)))].sort();
+    const latestMonth = months[months.length - 1];
+
+    // Auto-select logic
     if (!this.selectedMonth || !months.includes(this.selectedMonth)) {
-      this.selectedMonth = months[months.length - 1];
+      this.selectedMonth = latestMonth;
+    } else if (this._lastKnownMonthCount !== undefined && months.length > this._lastKnownMonthCount) {
+      // If a new month was added to the file, switch to it automatically
+      if (latestMonth > this.selectedMonth) {
+        this.selectedMonth = latestMonth;
+      }
     }
+    
+    this._lastKnownMonthCount = months.length;
 
     const rawMonth = this.getRawMonthData();
     this.renderHeader(el, months, rawMonth);
@@ -312,9 +333,9 @@ class FinancasView extends obsidian.ItemView {
     // Income is static: based on the first entry's balance
     const receitas = rawMonth.length > 0 ? rawMonth[0].balance : 0;
     // Expenses card is dynamic: sums based on active filters
-    const filteredDespesas = data.filter(r => r.amount !== 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    const filteredDespesas = data.reduce((s, r) => s + (r.amount ? Math.abs(r.amount) : 0), 0);
     // Balance is static: follows Income - Total Month Expenses formula
-    const totalMonthDespesas = rawMonth.filter(r => r.amount !== 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    const totalMonthDespesas = rawMonth.reduce((s, r) => s + (r.amount ? Math.abs(r.amount) : 0), 0);
     const saldo = receitas - totalMonthDespesas;
     
     const cards = el.createDiv("financas-cards");
