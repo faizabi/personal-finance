@@ -309,9 +309,13 @@ class FinancasView extends obsidian.ItemView {
     const data = this.getFilteredData();
     const rawMonth = this.getRawMonthData();
     
+    // Income is static: based on the first entry's balance
     const receitas = rawMonth.length > 0 ? rawMonth[0].balance : 0;
-    const despesas = data.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
-    const saldo    = rawMonth.length > 0 ? rawMonth[rawMonth.length - 1].balance : 0;
+    // Expenses card is dynamic: sums based on active filters
+    const filteredDespesas = data.filter(r => r.amount !== 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    // Balance is static: follows Income - Total Month Expenses formula
+    const totalMonthDespesas = rawMonth.filter(r => r.amount !== 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    const saldo = receitas - totalMonthDespesas;
     
     const cards = el.createDiv("financas-cards");
 
@@ -322,7 +326,7 @@ class FinancasView extends obsidian.ItemView {
     };
 
     mkCard("📈 Income", receitas, "card-receita");
-    mkCard("📉 Expenses", despesas, "card-despesa");
+    mkCard("📉 Expenses", filteredDespesas, "card-despesa");
     // Balance: show explicit "-" when negative
     mkCard(
       saldo >= 0 ? "🤑 Balance" : "🔴 Balance",
@@ -403,7 +407,7 @@ class FinancasView extends obsidian.ItemView {
 
     buckets.forEach(b => {
       const actualSpend = rawMonth
-        .filter(r => r.amount < 0 && b.keywords.some(k => r.categoria.toLowerCase().includes(k)))
+        .filter(r => r.amount !== 0 && b.keywords.some(k => r.categoria.toLowerCase().includes(k)))
         .reduce((sum, r) => sum + Math.abs(r.amount), 0);
       
       const actualPct = income > 0 ? (actualSpend / income) * 100 : 0;
@@ -428,7 +432,7 @@ class FinancasView extends obsidian.ItemView {
 
     const byDay = {};
     data.forEach(r => {
-      if (r.amount < 0) {
+      if (r.amount !== 0) {
         const k = dayKey(r.date);
         byDay[k] = (byDay[k] || 0) + Math.abs(r.amount);
       }
@@ -535,7 +539,7 @@ class FinancasView extends obsidian.ItemView {
     const expenseBars = points.filter(p => p.hasData).map(p => {
       const dayStr = `${dateParts.y}-${String(dateParts.m).padStart(2,"0")}-${String(p.day).padStart(2,"0")}`;
       const dayExpense = rawData
-        .filter(r => dayKey(r.date) === dayStr && r.amount < 0)
+        .filter(r => dayKey(r.date) === dayStr && r.amount !== 0)
         .reduce((s, r) => s + Math.abs(r.amount), 0);
       
       if (dayExpense === 0) return "";
@@ -658,7 +662,7 @@ class FinancasView extends obsidian.ItemView {
         return true;
       });
       const receitas = mData.length > 0 ? mData[0].balance : 0;
-      const despesas = mData.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+      const despesas = mData.filter(r => r.amount !== 0).reduce((s, r) => s + Math.abs(r.amount), 0);
       return { month: m, receitas, despesas };
     });
 
@@ -809,10 +813,10 @@ class SettingsModal extends obsidian.Modal {
 const STYLES = `
 .financas-view {
   padding: 0;
-  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Segoe UI Condensed', 'Roboto Condensed', 'Segoe UI', Tahoma, sans-serif;
+  letter-spacing: -0.015em;
   padding-top: 0 !important;
   overflow-y: auto;
-  font-family: var(--font-interface);
 }
 /* O Obsidian injeta padding/margin em .view-content — zeramos aqui */
 .view-content:has(.financas-view) {
