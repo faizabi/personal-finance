@@ -2,7 +2,13 @@
 var obsidian = require('obsidian');
 
 const VIEW_TYPE = "financas-overview";
-const DEFAULT_SETTINGS = { dataFilePath: "Calcs/Monthly Calcs.md", currency: "BRL", locale: "pt-BR" };
+const DEFAULT_SETTINGS = { 
+  dataFilePath: "Calcs/Monthly Calcs.md", 
+  currency: "BRL", 
+  locale: "pt-BR",
+  // Default budget percentages for Group 1 sliders
+  budgetTargets: { essential: 50, nonEssential: 30, charity: 10, savings: 10 }
+};
 
 const CATEGORY_COLORS = [
   "#4f8ef7","#f76c6c","#43c59e","#f7b731","#a29bfe",
@@ -211,8 +217,10 @@ class FinancasView extends obsidian.ItemView {
     const rawMonth = this.getRawMonthData();
     this.renderHeader(el, months, rawMonth);
     this.renderSummaryCards(el);
+    this.renderBudgetSliders(el);
     this.renderBarChart(el, months);
-    this.renderDailyChart(el);
+    this.renderExpensesChart(el);
+    this.renderBalanceChart(el);
     this.renderCategoryTable(el);
   }
 
@@ -302,7 +310,7 @@ class FinancasView extends obsidian.ItemView {
     const rawMonth = this.getRawMonthData();
     
     const receitas = rawMonth.length > 0 ? rawMonth[0].balance : 0;
-    const despesas = rawMonth.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
+    const despesas = data.filter(r => r.amount < 0).reduce((s, r) => s + Math.abs(r.amount), 0);
     const saldo    = rawMonth.length > 0 ? rawMonth[rawMonth.length - 1].balance : 0;
     
     const cards = el.createDiv("financas-cards");
@@ -324,11 +332,132 @@ class FinancasView extends obsidian.ItemView {
     );
   }
 
-  // ── Gráfico diário (linha + área) ──────────────────────────────────────────
-  renderDailyChart(el) {
+  renderBudgetSliders(el) {
+    const rawMonth = this.getRawMonthData();
+    const income = rawMonth.length > 0 ? rawMonth[0].balance : 0;
+    if (income <= 0) return;
+
+    const section = el.createDiv("financas-section");
+    section.createEl("h2", { cls: "financas-section-title", text: "Budget Planning vs. Actual" });
+    
+    const container = section.createDiv("financas-budget-container");
+    
+    const buckets = [
+      { id: "essential", label: "Essential Spendings", color: "#4f8ef7", keywords: ['food', 'rent', 'housing', 'bills', 'transport', 'medical', 'essential'] },
+      { id: "nonEssential", label: "Non-Essential Spendings", color: "#f7b731", keywords: ['entertainment', 'shopping', 'hobby', 'luxury', 'non-essential', 'games'] },
+      { id: "charity", label: "Charity", color: "#a29bfe", keywords: ['charity', 'donation', 'gift', 'church'] },
+      { id: "savings", label: "Savings & Investments", color: "#43c59e", keywords: ['savings', 'investment', 'stock', 'crypto', 'retirement'] }
+    ];
+
+    // --- Group 1: Manual Adjustment ---
+    const group1 = container.createDiv("financas-budget-group");
+    group1.createEl("h3", { text: "Planned Budget (Target %)" });
+    
+    buckets.forEach(b => {
+      const currentPct = this.plugin.settings.budgetTargets[b.id];
+      const row = group1.createDiv("financas-slider-row");
+      row.createEl("label", { text: b.label });
+      
+      const sliderWrap = row.createDiv("financas-slider-wrap");
+      const slider = sliderWrap.createEl("input", { type: "range", value: currentPct, attr: { min: 0, max: 100 } });
+      const valDisplay = sliderWrap.createEl("span", { 
+        text: `${currentPct}% (${fmtBRL((income * currentPct) / 100)})`,
+        cls: "financas-slider-val"
+      });
+
+      slider.addEventListener("input", async (e) => {
+        let val = parseInt(e.target.value);
+        const others = buckets.filter(item => item.id !== b.id);
+        const otherSum = others.reduce((s, item) => s + this.plugin.settings.budgetTargets[item.id], 0);
+
+        // Constraint: Total cannot exceed 100%
+        if (val + otherSum > 100) {
+          val = 100 - otherSum;
+          e.target.value = val;
+        }
+
+        this.plugin.settings.budgetTargets[b.id] = val;
+        valDisplay.textContent = `${val}% (${fmtBRL((income * val) / 100)})`;
+        
+        // Save settings debounced or on change
+        await this.plugin.saveSettings();
+        this.refreshActualSliders(income, buckets);
+      });
+    });
+
+    // --- Group 2: Actual Data (Display Only) ---
+    const group2 = container.createDiv("financas-budget-group");
+    group2.createEl("h3", { text: "Actual Spending" });
+    this.actualSlidersEl = group2;
+    this.refreshActualSliders(income, buckets);
+  }
+
+  refreshActualSliders(income, buckets) {
+    if (!this.actualSlidersEl) return;
+    const group2 = this.actualSlidersEl;
+    const rawMonth = this.getRawMonthData();
+    
+    // Remove existing display rows except title
+    const rows = group2.querySelectorAll(".financas-slider-row");
+    rows.forEach(r => r.remove());
+
+    buckets.forEach(b => {
+      const actualSpend = rawMonth
+        .filter(r => r.amount < 0 && b.keywords.some(k => r.categoria.toLowerCase().includes(k)))
+        .reduce((sum, r) => sum + Math.abs(r.amount), 0);
+      
+      const actualPct = income > 0 ? (actualSpend / income) * 100 : 0;
+      
+      const row = group2.createDiv("financas-slider-row");
+      row.createEl("label", { text: b.label });
+      
+      const progressWrap = row.createDiv("financas-progress-container");
+      const progressBar = progressWrap.createDiv("financas-progress-fill");
+      progressBar.style.width = `${Math.min(actualPct, 100)}%`;
+      progressBar.style.backgroundColor = b.color;
+      
+      row.createEl("span", { text: `${actualPct.toFixed(1)}% (${fmtBRL(actualSpend)})`, cls: "financas-slider-val" });
+    });
+  }
+
+  // ── Expenses vs Date (Dynamic Filter) ──────────────────────────────────────
+  renderExpensesChart(el) {
     const data = this.getFilteredData();
     const section = el.createDiv("financas-section");
-    section.createEl("h2", { cls: "financas-section-title", text: "Daily Balance" });
+    section.createEl("h2", { cls: "financas-section-title", text: "Daily Expenses Trend" });
+
+    const byDay = {};
+    data.forEach(r => {
+      if (r.amount < 0) {
+        const k = dayKey(r.date);
+        byDay[k] = (byDay[k] || 0) + Math.abs(r.amount);
+      }
+    });
+
+    if (Object.keys(byDay).length === 0) {
+      section.createEl("p", { cls: "financas-empty-msg", text: "No filtered expenses to show." });
+      return;
+    }
+
+    const [y, m] = this.selectedMonth.split("-").map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const points = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const k = `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      points.push({ day: d, value: byDay[k] || 0, hasData: byDay[k] !== undefined });
+    }
+
+    const lastWithData = points.reduce((last, p, i) => p.hasData ? i : last, -1);
+    const visiblePoints = lastWithData >= 0 ? points.slice(0, lastWithData + 1) : points;
+
+    this.renderLineChart(section, visiblePoints, daysInMonth, data, { y, m }, "expenses", false);
+  }
+
+  // ── Balance vs Date (Static Month Data) ────────────────────────────────────
+  renderBalanceChart(el) {
+    const data = this.getRawMonthData();
+    const section = el.createDiv("financas-section");
+    section.createEl("h2", { cls: "financas-section-title", text: "Monthly Balance Stability" });
 
     const byDay = {};
     data.forEach(r => {
@@ -361,10 +490,10 @@ class FinancasView extends obsidian.ItemView {
     const lastWithData = points.reduce((last, p, i) => p.hasData ? i : last, -1);
     const visiblePoints = lastWithData >= 0 ? points.slice(0, lastWithData + 1) : points;
 
-    this.renderLineChart(section, visiblePoints, daysInMonth, data, { y, m });
+    this.renderLineChart(section, visiblePoints, daysInMonth, data, { y, m }, "balance", true);
   }
 
-  renderLineChart(container, points, daysInMonth, rawData, dateParts) {
+  renderLineChart(container, points, daysInMonth, rawData, dateParts, type, useRedZone) {
     const wrap = container.createDiv("financas-linechart-wrap");
 
     const W = 620, H = 200, PAD = { top: 20, right: 80, bottom: 32, left: 68 };
@@ -396,7 +525,7 @@ class FinancasView extends obsidian.ItemView {
     const isPos = lastVal >= 0;
     const colorMain = isPos ? "#43c59e" : "#f76c6c";
     const colorRGB  = isPos ? "67,197,158" : "247,108,108";
-    const uid = this.selectedMonth;
+    const uid = `${type}-${this.selectedMonth}`;
 
     // Red Zone calculation (Balance < 800)
     const y800 = yScale(800);
@@ -474,7 +603,7 @@ class FinancasView extends obsidian.ItemView {
         ${xLabels.join("")}
 
         <!-- Red Zone Area -->
-        ${showRedZone ? `
+        ${useRedZone && showRedZone ? `
           <rect x="${PAD.left}" y="${y800.toFixed(1)}" width="${chartW}" 
                 height="${Math.max(0, yScale(minVal) - y800).toFixed(1)}"
                 fill="rgba(247, 108, 108, 0.08)" clip-path="url(#lc-clip-${uid})"/>
@@ -482,7 +611,7 @@ class FinancasView extends obsidian.ItemView {
                 stroke="#f76c6c" stroke-width="1" stroke-dasharray="2,2" opacity="0.3"/>
         ` : ""}
 
-        ${expenseBars}
+        ${type === "balance" ? expenseBars : ""}
 
         <!-- Linha do zero -->
         ${minVal < 0 && maxVal > 0 ? `
@@ -526,7 +655,6 @@ class FinancasView extends obsidian.ItemView {
     const monthTotals = months.map(m => {
       const mData = this.allData.filter(r => {
         if (monthKey(r.date) !== m) return false;
-        if (this.filterCategoria !== "all" && r.categoria !== this.filterCategoria) return false;
         return true;
       });
       const receitas = mData.length > 0 ? mData[0].balance : 0;
@@ -564,7 +692,7 @@ class FinancasView extends obsidian.ItemView {
   // ── Tabela por categoria com drill-down ──────────────────────────────────
   renderCategoryTable(el) {
     const data     = this.getFilteredData();
-    const despesas = data.filter(r => r.amount < 0);
+    const despesas = data.filter(r => r.amount !== 0); // Include all filtered entries with value
     const section  = el.createDiv("financas-section");
     section.createEl("h2", { cls: "financas-section-title", text: `Spending by Category — ${monthLabel(this.selectedMonth)}` });
 
@@ -681,7 +809,7 @@ class SettingsModal extends obsidian.Modal {
 const STYLES = `
 .financas-view {
   padding: 0;
-  margin-top: 0 !important;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   padding-top: 0 !important;
   overflow-y: auto;
   font-family: var(--font-interface);
@@ -713,6 +841,7 @@ const STYLES = `
   font-weight: 700;
   margin: 0;
   color: var(--text-normal);
+  letter-spacing: -0.02em;
 }
 
 .financas-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -734,6 +863,8 @@ const STYLES = `
   font-size: 0.78rem;
   color: var(--text-muted);
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .financas-select {
@@ -784,55 +915,58 @@ const STYLES = `
 .financas-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 15px;
   padding: 16px 20px;
 }
 
 .financas-card {
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: transform 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
+.financas-card:hover { transform: translateY(-2px); }
 
 .financas-card-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .financas-card-value {
-  font-size: 1.1rem;
-  font-weight: 700;
+  font-size: 1.25rem;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 
-.card-receita   { background: rgba(67,197,158,0.12); border: 1px solid rgba(67,197,158,0.3); }
+.card-receita   { background: linear-gradient(135deg, rgba(67,197,158,0.15), rgba(67,197,158,0.05)); border-left: 4px solid #43c59e; }
 .card-receita .financas-card-value { color: #43c59e; }
 
-.card-despesa   { background: rgba(247,108,108,0.12); border: 1px solid rgba(247,108,108,0.3); }
+.card-despesa   { background: linear-gradient(135deg, rgba(247,108,108,0.15), rgba(247,108,108,0.05)); border-left: 4px solid #f76c6c; }
 .card-despesa .financas-card-value { color: #f76c6c; }
 
-.card-saldo-pos { background: rgba(79,142,247,0.12); border: 1px solid rgba(79,142,247,0.3); }
+.card-saldo-pos { background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(79,142,247,0.05)); border-left: 4px solid #4f8ef7; }
 .card-saldo-pos .financas-card-value { color: #4f8ef7; }
 
-.card-saldo-neg { background: rgba(247,108,108,0.12); border: 1px solid rgba(247,108,108,0.3); }
+.card-saldo-neg { background: linear-gradient(135deg, rgba(247,108,108,0.15), rgba(247,108,108,0.05)); border-left: 4px solid #f76c6c; }
 .card-saldo-neg .financas-card-value { color: #f76c6c; }
 
 /* ── Sections ── */
 .financas-section { padding: 0 20px 20px; }
 
 .financas-section-title {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.7rem;
+  font-weight: 800;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.12em;
   margin: 0 0 10px;
-  padding-top: 4px;
+  padding-top: 15px;
 }
 
 /* ── Gráfico de linha diário ── */
@@ -929,6 +1063,52 @@ const STYLES = `
 .financas-progress-wrap {
   background: var(--background-modifier-border);
   border-radius: 99px; height: 5px; min-width: 60px; overflow: hidden;
+}
+
+/* ── Budget Sliders ── */
+.financas-budget-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  background: rgba(var(--mono-rgb-100), 0.03);
+  padding: 16px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+.financas-budget-group h3 {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.financas-slider-row { margin-bottom: 12px; }
+.financas-slider-row label {
+  display: block;
+  font-size: 0.7rem;
+  margin-bottom: 4px;
+  color: var(--text-normal);
+  font-weight: 600;
+}
+.financas-slider-wrap { display: flex; align-items: center; gap: 10px; }
+.financas-slider-wrap input[type=range] { flex: 1; }
+.financas-slider-val {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 90px;
+}
+.financas-progress-container {
+  background: var(--background-modifier-border);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.financas-progress-fill {
+  height: 100%;
+  transition: width 0.3s ease;
 }
 .financas-progress-bar { height: 100%; border-radius: 99px; }
 
