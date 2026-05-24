@@ -7,7 +7,10 @@ const DEFAULT_SETTINGS = {
   currency: "BRL", 
   locale: "pt-BR",
   // Default budget percentages for Group 1 sliders
-  budgetTargets: { essential: 50, nonEssential: 30, charity: 10, savings: 10 }
+  budgetTargets: { essential: 50, nonEssential: 30, charity: 10, savings: 10 },
+  bgImage: "",
+  stickerUrl: "",
+  stickerOpacity: 0.3
 };
 
 const CATEGORY_COLORS = [
@@ -218,10 +221,21 @@ class FinancasView extends obsidian.ItemView {
     el.empty();
     el.addClass("financas-view");
 
+    // Apply custom background if exists
+    if (this.plugin.settings.bgImage) {
+      el.style.backgroundImage = `url("${this.plugin.settings.bgImage}")`;
+      el.style.backgroundSize = "cover";
+      el.style.backgroundAttachment = "fixed";
+    }
+
     const { exists, data } = await this.getFileData();
     this.allData = data;
     setFormatSettings(this.plugin.settings);
     if (!exists || this.allData.length === 0) { this.renderEmpty(el, exists); return; }
+
+    if (this.plugin.settings.stickerUrl) {
+      el.createEl("img", { cls: "financas-sticker", attr: { src: this.plugin.settings.stickerUrl, style: `opacity: ${this.plugin.settings.stickerOpacity}` } });
+    }
 
     const months = [...new Set(this.allData.map(r => monthKey(r.date)))].sort();
     const latestMonth = months[months.length - 1];
@@ -791,10 +805,15 @@ class FinancasView extends obsidian.ItemView {
 
     // Detailed table when filtered
     if (this.filterCategoria !== "all") {
+      const catIndex = sorted.findIndex(([cat]) => cat === this.filterCategoria);
+      const catColor = catIndex >= 0 ? CATEGORY_COLORS[catIndex % CATEGORY_COLORS.length] : 'var(--interactive-accent)';
+      
       section.createEl("h3", { cls: "financas-section-subtitle", text: "Transaction Details" });
       const detailTable = section.createEl("table", { cls: "financas-table financas-detail-table" });
       const dHead = detailTable.createEl("thead");
       const dHeadRow = dHead.createEl("tr");
+      dHeadRow.style.borderBottom = `2px solid ${catColor}`;
+      
       ["Date", "Expense", "Category", "Description"].forEach(h => dHeadRow.createEl("th", { text: h }));
       
       const dBody = detailTable.createEl("tbody");
@@ -861,6 +880,9 @@ class SettingsModal extends obsidian.Modal {
       this.plugin.settings.dataFilePath = inputPath.value.trim();
       this.plugin.settings.currency     = inputCurrency.value.trim().toUpperCase() || "BRL";
       this.plugin.settings.locale       = selLocale.value;
+      this.plugin.settings.bgImage      = inputBg.value.trim();
+      this.plugin.settings.stickerUrl   = inputSticker.value.trim();
+      this.plugin.settings.stickerOpacity = parseFloat(inputOpacity.value) || 0.3;
       await this.plugin.saveSettings();
       this.close(); this.onSave();
     });
@@ -1029,11 +1051,13 @@ const STYLES = `
   padding: 24px;
   margin: 0 20px 24px;
   background: var(--background-primary-alt);
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid rgba(var(--mono-rgb-100), 0.1);
   border-radius: 16px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.05);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(15px) saturate(180%);
+  transition: transform 0.3s ease, border-color 0.3s ease;
 }
+.financas-section:hover { transform: translateY(-4px); border-color: rgba(var(--mono-rgb-100), 0.2); }
 
 .financas-section-title {
   font-size: 0.7rem;
@@ -1141,6 +1165,16 @@ const STYLES = `
 }
 .financas-table tbody tr:hover td { background: var(--background-modifier-hover); }
 .financas-td-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
+.financas-detail-table tbody tr:nth-child(even) {
+  background: rgba(var(--mono-rgb-100), 0.02);
+}
+.financas-detail-table thead th {
+  background: rgba(var(--mono-rgb-100), 0.04);
+  color: var(--text-normal);
+}
+.financas-detail-table td {
+  border-left: 1px solid transparent;
+}
 .financas-td-desc { 
   font-style: italic; 
   color: var(--text-muted); 
@@ -1328,6 +1362,16 @@ const STYLES = `
   /* Esconde coluna de barra de progresso no mobile */
   .financas-table th:last-child,
   .financas-table td:last-child { display: none; }
+}
+
+.financas-sticker {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  max-width: 200px;
+  max-height: 200px;
+  pointer-events: none;
+  z-index: 10;
 }
 `;
 
