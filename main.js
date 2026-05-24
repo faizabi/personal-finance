@@ -4,8 +4,8 @@ var obsidian = require('obsidian');
 const VIEW_TYPE = "financas-overview";
 const DEFAULT_SETTINGS = { 
   dataFilePath: "Calcs/Monthly Calcs.md", 
-  currency: "BRL", 
-  locale: "pt-BR",
+  currency: "INR", 
+  locale: "en-IN",
   // Default budget percentages for Group 1 sliders
   budgetTargets: { essential: 50, nonEssential: 30, charity: 10, savings: 10 },
   bgImage: "",
@@ -36,7 +36,7 @@ function parseCSVLine(line) {
 function parseValue(str) {
   if (!str) return null;
   // Remove currency symbols (R$, Rs.), Markdown formatting (**), and commas
-  let cleaned = str.replace(/R\$\s*|Rs\.\s*|\*\*|\*/gi, "").replace(/"/g, "").replace(/,/g, "").trim();
+  let cleaned = str.replace(/R\$\s*|Rs\.\s*|₹\s*|\*\*|\*/gi, "").replace(/"/g, "").replace(/,/g, "").trim();
   // Remove any internal spaces (e.g. "1 000.00" -> "1000.00")
   cleaned = cleaned.replace(/\s/g, "");
   if (!cleaned) return null;
@@ -46,12 +46,14 @@ function parseValue(str) {
 
 function parseDate(str) {
   if (!str || !str.trim()) return null;
-  let match = str.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  // Support both YYYY-MM-DD and DD-MM-YYYY with hyphens or slashes
+  let cleaned = str.trim().replace(/\//g, "-");
+  let match = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (match) {
     const date = new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]));
     return isNaN(date.getTime()) ? null : date;
   }
-  match = str.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{1,4})$/);
+  match = cleaned.match(/^(\d{1,2})-(\d{1,2})-(\d{1,4})$/);
   if (!match) return null;
   const date = new Date(parseInt(match[3]), parseInt(match[2]) - 1, parseInt(match[1]));
   return isNaN(date.getTime()) ? null : date;
@@ -156,9 +158,9 @@ function parseMarkdownTable(content) {
 }
 
 // Formatação dinâmica baseada nas settings (chamada via plugin.settings)
-let _formatSettings = { currency: "BRL", locale: "pt-BR" };
+let _formatSettings = { currency: "INR", locale: "en-IN" };
 function setFormatSettings(s) { _formatSettings = s; }
-function fmtBRL(value) {
+function fmtCurrency(value) {
   try {
     return Math.abs(value).toLocaleString(_formatSettings.locale, {
       style: "currency",
@@ -167,7 +169,7 @@ function fmtBRL(value) {
       maximumFractionDigits: 2,
     });
   } catch(e) {
-    return Math.abs(value).toLocaleString("pt-BR", { style:"currency", currency:"BRL", minimumFractionDigits:2 });
+    return Math.abs(value).toLocaleString("en-IN", { style:"currency", currency:"INR", minimumFractionDigits:2 });
   }
 }
 
@@ -350,9 +352,9 @@ class FinancasView extends obsidian.ItemView {
     // Income is static: based on the first entry's balance
     const receitas = rawMonth.length > 0 ? rawMonth[0].balance : 0;
     // Expenses card is dynamic: sums based on active filters
-    const filteredDespesas = data.reduce((s, r) => s + (r.amount ? Math.abs(r.amount) : 0), 0);
+    const filteredDespesas = data.reduce((s, r) => s + (typeof r.amount === 'number' ? Math.abs(r.amount) : 0), 0);
     // Balance is static: follows Income - Total Month Expenses formula
-    const totalMonthDespesas = rawMonth.reduce((s, r) => s + (r.amount ? Math.abs(r.amount) : 0), 0);
+    const totalMonthDespesas = rawMonth.reduce((s, r) => s + (typeof r.amount === 'number' ? Math.abs(r.amount) : 0), 0);
     const saldo = receitas - totalMonthDespesas;
     
     const cards = el.createDiv("financas-cards");
@@ -360,7 +362,7 @@ class FinancasView extends obsidian.ItemView {
     const mkCard = (label, value, cls, prefix = "") => {
       const card = cards.createDiv(`financas-card ${cls}`);
       card.createEl("div", { cls: "financas-card-label", text: label });
-      card.createEl("div", { cls: "financas-card-value", text: `${prefix}${fmtBRL(value)}` });
+      card.createEl("div", { cls: "financas-card-value", text: `${prefix}${fmtCurrency(value)}` });
     };
 
     mkCard("📈 Income", receitas, "card-receita");
@@ -403,7 +405,7 @@ class FinancasView extends obsidian.ItemView {
       const sliderWrap = row.createDiv("financas-slider-wrap");
       const slider = sliderWrap.createEl("input", { type: "range", value: currentPct, attr: { min: 0, max: 100 } });
       const valDisplay = sliderWrap.createEl("span", { 
-        text: `${currentPct}% (${fmtBRL((income * currentPct) / 100)})`,
+        text: `${currentPct}% (${fmtCurrency((income * currentPct) / 100)})`,
         cls: "financas-slider-val"
       });
 
@@ -419,7 +421,7 @@ class FinancasView extends obsidian.ItemView {
         }
 
         this.plugin.settings.budgetTargets[b.id] = val;
-        valDisplay.textContent = `${val}% (${fmtBRL((income * val) / 100)})`;
+        valDisplay.textContent = `${val}% (${fmtCurrency((income * val) / 100)})`;
         
         // Save settings debounced or on change
         await this.plugin.saveSettings();
@@ -456,9 +458,9 @@ class FinancasView extends obsidian.ItemView {
       const progressWrap = row.createDiv("financas-progress-container");
       const progressBar = progressWrap.createDiv("financas-progress-fill");
       progressBar.style.width = `${Math.min(actualPct, 100)}%`;
-      progressBar.style.backgroundColor = b.color;
+      progressBar.style.backgroundImage = `linear-gradient(90deg, ${b.color}88, ${b.color})`;
       
-      row.createEl("span", { text: `${actualPct.toFixed(1)}% (${fmtBRL(actualSpend)})`, cls: "financas-slider-val" });
+      row.createEl("span", { text: `${actualPct.toFixed(1)}% (${fmtCurrency(actualSpend)})`, cls: "financas-slider-val" });
     });
   }
 
@@ -590,7 +592,7 @@ class FinancasView extends obsidian.ItemView {
     // Interaction points for hover
     const hoverPoints = points.filter(p => p.hasData).map(p => `
       <circle cx="${xScale(p.day).toFixed(1)}" cy="${yScale(p.value).toFixed(1)}" r="4" fill="${colorMain}" opacity="0">
-        <title>${fmtBRL(p.value)} (Day ${p.day})</title>
+        <title>${fmtCurrency(p.value)} (Day ${p.day})</title>
       </circle>
       <circle cx="${xScale(p.day).toFixed(1)}" cy="${yScale(p.value).toFixed(1)}" r="1.5" fill="${colorMain}" opacity="0.4" pointer-events="none"/>
     `).join("");
@@ -626,7 +628,7 @@ class FinancasView extends obsidian.ItemView {
     const lpy = parseFloat(yScale(lastVal).toFixed(1));
 
     // Label do último ponto (valor formatado + dia)
-    const labelVal = fmtBRL(Math.abs(lastVal));
+    const labelVal = fmtCurrency(Math.abs(lastVal));
     const labelDay = `Day ${last.day}`;
     // Posiciona label à direita do ponto
     const labelX = lpx + 12;
@@ -727,10 +729,10 @@ class FinancasView extends obsidian.ItemView {
       const mkBar = (val, cls, label) => {
         const bar = bars.createDiv(`financas-bar ${cls}`);
         bar.style.height = `${Math.max((val / maxVal) * 100, 1)}%`;
-        bar.title = label;
+        bar.setAttr("title", label);
       };
-      mkBar(receitas, "bar-receita", `Income: ${fmtBRL(receitas)}`);
-      mkBar(despesas, "bar-despesa", `Expenses: ${fmtBRL(despesas)}`);
+      mkBar(receitas, "bar-receita", `Income: ${fmtCurrency(receitas)}`);
+      mkBar(despesas, "bar-despesa", `Expenses: ${fmtCurrency(despesas)}`);
       col.createEl("div", { cls: "financas-bar-label", text: monthLabel(month) });
     });
 
@@ -785,7 +787,7 @@ class FinancasView extends obsidian.ItemView {
       dot.style.background = color;
       tdCat.createSpan({ text: cat });
 
-      tr.createEl("td", { text: fmtBRL(total), cls: "financas-td-num" });
+      tr.createEl("td", { text: fmtCurrency(total), cls: "financas-td-num" });
       tr.createEl("td", { text: `${pct.toFixed(1)}%`, cls: "financas-td-num" });
 
       const tdBar   = tr.createEl("td");
@@ -799,7 +801,7 @@ class FinancasView extends obsidian.ItemView {
     const frow  = tfoot.createEl("tr", { cls: "financas-total-row" });
     frow.createEl("td");
     frow.createEl("td", { text: "Total" });
-    frow.createEl("td", { text: fmtBRL(totalDespesas), cls: "financas-td-num" });
+    frow.createEl("td", { text: fmtCurrency(totalDespesas), cls: "financas-td-num" });
     frow.createEl("td", { text: "100%" });
     frow.createEl("td");
 
@@ -825,7 +827,7 @@ class FinancasView extends obsidian.ItemView {
           
           const amountTd = tr.createEl("td", { cls: "financas-td-num" });
           amountTd.createSpan({ 
-            text: fmtBRL(r.amount), 
+            text: fmtCurrency(r.amount), 
             style: `color: ${r.amount > 0 ? '#43c59e' : '#f76c6c'}` 
           });
 
@@ -856,18 +858,33 @@ class SettingsModal extends obsidian.Modal {
       type: "text", cls: "financas-input financas-input-sm",
       value: this.plugin.settings.currency
     });
-    contentEl.createEl("p", { cls: "financas-hint", text: "ISO 4217 code — e.g. BRL, USD, EUR" });
+    contentEl.createEl("p", { cls: "financas-hint", text: "ISO 4217 code — e.g. INR, USD, EUR" });
+
+    // Visual Customization
+    contentEl.createEl("h3", { text: "Visual Customization", style: "margin-top: 20px;" });
+    contentEl.createEl("p", { cls: "financas-setting-label", text: "Background Image URL:" });
+    const inputBg = contentEl.createEl("input", { type: "text", cls: "financas-input", value: this.plugin.settings.bgImage });
+    contentEl.createEl("p", { cls: "financas-setting-label", text: "Anime Sticker URL:" });
+    const inputSticker = contentEl.createEl("input", { type: "text", cls: "financas-input", value: this.plugin.settings.stickerUrl });
+    contentEl.createEl("p", { cls: "financas-setting-label", text: "Sticker Opacity (0.1 - 1.0):" });
+    const inputOpacity = contentEl.createEl("input", { 
+      type: "number", 
+      cls: "financas-input financas-input-sm", 
+      attr: { step: 0.1, min: 0.1, max: 1.0 },
+      value: this.plugin.settings.stickerOpacity 
+    });
 
     // Locale
     contentEl.createEl("p", { cls: "financas-setting-label", text: "Number format locale:" });
     const selLocale = contentEl.createEl("select", { cls: "financas-input financas-input-sm" });
     const locales = [
-      ["pt-BR", "pt-BR — 1.234,56 (Brazil)"],
+      ["en-IN", "en-IN — 1,23,456.78 (India)"],
       ["en-US", "en-US — 1,234.56 (USA)"],
       ["en-GB", "en-GB — 1,234.56 (UK)"],
       ["de-DE", "de-DE — 1.234,56 (Germany)"],
       ["fr-FR", "fr-FR — 1 234,56 (France)"],
       ["es-ES", "es-ES — 1.234,56 (Spain)"],
+      ["pt-BR", "pt-BR — 1.234,56 (Brazil)"],
     ];
     locales.forEach(([val, label]) => {
       const opt = selLocale.createEl("option", { value: val, text: label });
@@ -1136,8 +1153,8 @@ const STYLES = `
   border-radius: 3px 3px 0 0;
   min-height: 2px;
 }
-.bar-receita { background: #43c59e; }
-.bar-despesa { background: #f76c6c; }
+.bar-receita { background: linear-gradient(180deg, #43c59e, #43c59e88); }
+.bar-despesa { background: linear-gradient(180deg, #f76c6c, #f76c6c88); }
 
 .financas-bar-label {
   font-size: 0.66rem;
@@ -1229,6 +1246,24 @@ const STYLES = `
 }
 .financas-slider-wrap { display: flex; align-items: center; gap: 10px; }
 .financas-slider-wrap input[type=range] { flex: 1; }
+
+.financas-slider-wrap input[type=range] {
+  -webkit-appearance: none;
+  height: 6px;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+.financas-slider-wrap input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  cursor: pointer;
+  margin-top: -4px; /* Centering for 6px track height */
+}
+
 .financas-slider-val {
   font-size: 0.7rem;
   color: var(--text-muted);
