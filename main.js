@@ -62,6 +62,9 @@ function monthLabel(key) {
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return `${months[parseInt(m) - 1]}/${y.slice(2)}`;
 }
+function fmtDate(date) {
+  return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
+}
 function dayKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 }
@@ -272,7 +275,7 @@ class FinancasView extends obsidian.ItemView {
 
     // Linha única: título + mês + filtros + botões
     const row1 = header.createDiv("financas-header-row");
-    row1.createEl("h1", { text: "💰 Personal Finance", cls: "financas-title" });
+    row1.createEl("h1", { text: "انا حساب", cls: "financas-title" });
 
     const controls = row1.createDiv("financas-controls");
     const selectMonth = controls.createEl("select", { cls: "financas-select" });
@@ -570,6 +573,14 @@ class FinancasView extends obsidian.ItemView {
                     fill="#f76c6c" opacity="0.5" />`;
     }).join("");
 
+    // Interaction points for hover
+    const hoverPoints = points.filter(p => p.hasData).map(p => `
+      <circle cx="${xScale(p.day).toFixed(1)}" cy="${yScale(p.value).toFixed(1)}" r="4" fill="${colorMain}" opacity="0">
+        <title>${fmtBRL(p.value)} (Day ${p.day})</title>
+      </circle>
+      <circle cx="${xScale(p.day).toFixed(1)}" cy="${yScale(p.value).toFixed(1)}" r="1.5" fill="${colorMain}" opacity="0.4" pointer-events="none"/>
+    `).join("");
+
     // Grade horizontal
     const gridLines = [];
     const nGrids = 4;
@@ -652,6 +663,9 @@ class FinancasView extends obsidian.ItemView {
         <path d="${linePath}" fill="none" stroke="${colorMain}" stroke-width="2"
               stroke-linejoin="round" stroke-linecap="round"
               clip-path="url(#lc-clip-${uid})"/>
+
+        <!-- Hover hit targets -->
+        ${hoverPoints}
 
         <!-- Ponto final com glow -->
         <circle cx="${lpx}" cy="${lpy}" r="10" fill="${colorMain}" opacity="0.12"
@@ -764,7 +778,7 @@ class FinancasView extends obsidian.ItemView {
       const barWrap = tdBar.createDiv("financas-progress-wrap");
       const bar     = barWrap.createDiv("financas-progress-bar");
       bar.style.width    = `${pct}%`;
-      bar.style.background = color;
+      bar.style.backgroundImage = `linear-gradient(90deg, ${color}88, ${color})`;
     });
 
     const tfoot = table.createEl("tfoot");
@@ -774,6 +788,32 @@ class FinancasView extends obsidian.ItemView {
     frow.createEl("td", { text: fmtBRL(totalDespesas), cls: "financas-td-num" });
     frow.createEl("td", { text: "100%" });
     frow.createEl("td");
+
+    // Detailed table when filtered
+    if (this.filterCategoria !== "all") {
+      section.createEl("h3", { cls: "financas-section-subtitle", text: "Transaction Details" });
+      const detailTable = section.createEl("table", { cls: "financas-table financas-detail-table" });
+      const dHead = detailTable.createEl("thead");
+      const dHeadRow = dHead.createEl("tr");
+      ["Date", "Expense", "Category", "Description"].forEach(h => dHeadRow.createEl("th", { text: h }));
+      
+      const dBody = detailTable.createEl("tbody");
+      despesas
+        .sort((a, b) => a.date - b.date)
+        .forEach(r => {
+          const tr = dBody.createEl("tr");
+          tr.createEl("td", { text: fmtDate(r.date) });
+          
+          const amountTd = tr.createEl("td", { cls: "financas-td-num" });
+          amountTd.createSpan({ 
+            text: fmtBRL(r.amount), 
+            style: `color: ${r.amount > 0 ? '#43c59e' : '#f76c6c'}` 
+          });
+
+          tr.createEl("td", { text: r.categoria || "-" });
+          tr.createEl("td", { text: r.descricao || "-", cls: "financas-td-desc" });
+        });
+    }
   }
 }
 
@@ -832,12 +872,14 @@ class SettingsModal extends obsidian.Modal {
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Gulzar&display=swap');
 .financas-view {
   padding: 0;
   font-family: 'Segoe UI Condensed', 'Roboto Condensed', 'Segoe UI', Tahoma, sans-serif;
   letter-spacing: -0.015em;
-  padding-top: 0 !important;
+  padding: 0 0 40px 0 !important;
   overflow-y: auto;
+  background: var(--background-primary);
 }
 /* O Obsidian injeta padding/margin em .view-content — zeramos aqui */
 .view-content:has(.financas-view) {
@@ -862,6 +904,7 @@ const STYLES = `
 }
 
 .financas-title {
+  font-family: 'Gulzar', serif;
   font-size: 1.15rem;
   font-weight: 700;
   margin: 0;
@@ -982,7 +1025,15 @@ const STYLES = `
 .card-saldo-neg .financas-card-value { color: #f76c6c; }
 
 /* ── Sections ── */
-.financas-section { padding: 0 20px 20px; }
+.financas-section { 
+  padding: 24px;
+  margin: 0 20px 24px;
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.05);
+  backdrop-filter: blur(10px);
+}
 
 .financas-section-title {
   font-size: 0.7rem;
@@ -990,25 +1041,36 @@ const STYLES = `
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  margin: 0 0 10px;
-  padding-top: 15px;
+  margin: 0 0 16px;
+}
+.financas-section-subtitle {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  margin: 20px 0 10px;
 }
 
 /* ── Gráfico de linha diário ── */
 .financas-linechart-wrap {
-  background: var(--background-secondary);
-  border-radius: 10px;
+  background: rgba(var(--mono-rgb-100), 0.03);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
   padding: 12px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
   overflow-x: auto;
+}
+.financas-linechart-wrap circle {
+  cursor: crosshair;
 }
 
 /* ── Gráfico de barras mensal ── */
 .financas-chart-wrap {
-  background: var(--background-secondary);
-  border-radius: 10px;
+  background: rgba(var(--mono-rgb-100), 0.03);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
   padding: 12px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
   overflow-x: auto;
 }
 
@@ -1079,10 +1141,24 @@ const STYLES = `
 }
 .financas-table tbody tr:hover td { background: var(--background-modifier-hover); }
 .financas-td-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
+.financas-td-desc { 
+  font-style: italic; 
+  color: var(--text-muted); 
+  font-size: 0.8rem; 
+  max-width: 200px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .financas-cat-dot {
   display: inline-block; width: 9px; height: 9px;
   border-radius: 50%; margin-right: 7px; vertical-align: middle;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.financas-progress-bar { 
+  height: 100%; 
+  border-radius: 99px; 
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
 }
 
 .financas-progress-wrap {
@@ -1095,10 +1171,11 @@ const STYLES = `
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
-  background: rgba(var(--mono-rgb-100), 0.03);
+  background: rgba(var(--mono-rgb-100), 0.02);
+  border: 1px solid var(--background-modifier-border);
   padding: 16px;
   border-radius: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 .financas-budget-group h3 {
   font-size: 0.65rem;
